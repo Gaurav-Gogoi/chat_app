@@ -9,6 +9,7 @@ export default function ChatRoom() {
 
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState("");
+  const [isConnected, setIsConnected] = useState(false); // Track connection status
   const chatSocketRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -22,19 +23,33 @@ export default function ChatRoom() {
   }, [messages]);
 
   useEffect(() => {
-    const wsProtocol =
-      window.location.protocol === "https:" ? "wss://" : "ws://";
+    // Determine protocol based on environment (wss for production, ws for local)
+    const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+    
+    // Ensure this environment variable is set in Vercel
     const backendHost = import.meta.env.VITE_BACKEND_URL || "127.0.0.1:8000";
     const wsUrl = `${wsProtocol}${backendHost}/ws/chat/${roomName}/`;
+    
+    console.log("Connecting to:", wsUrl);
     chatSocketRef.current = new WebSocket(wsUrl);
+
+    chatSocketRef.current.onopen = () => {
+      console.log("WebSocket Connected");
+      setIsConnected(true);
+    };
 
     chatSocketRef.current.onmessage = function (event) {
       const data = JSON.parse(event.data);
       setMessages((prev) => [...prev, data]);
     };
 
-    chatSocketRef.current.onclose = function () {
-      console.error("Chat socket closed unexpectedly");
+    chatSocketRef.current.onclose = function (e) {
+      setIsConnected(false);
+      console.error("Chat socket closed unexpectedly", e);
+    };
+
+    chatSocketRef.current.onerror = function (err) {
+      console.error("WebSocket Error:", err);
     };
 
     return () => {
@@ -46,7 +61,13 @@ export default function ChatRoom() {
 
   const sendMessage = (e) => {
     e.preventDefault();
-    if (inputMessage.trim() && chatSocketRef.current) {
+    
+    // Safety check: only send if input is not empty and socket is OPEN
+    if (
+      inputMessage.trim() && 
+      chatSocketRef.current && 
+      chatSocketRef.current.readyState === WebSocket.OPEN
+    ) {
       chatSocketRef.current.send(
         JSON.stringify({
           message: inputMessage,
@@ -84,9 +105,9 @@ export default function ChatRoom() {
           </button>
           <div>
             <h2 className="text-xl font-bold text-gray-800">#{roomName}</h2>
-            <p className="text-xs text-green-500 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              Connected as {username}
+            <p className={`text-xs flex items-center gap-1 ${isConnected ? 'text-green-500' : 'text-amber-500'}`}>
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-amber-500'}`}></span>
+              {isConnected ? `Connected as ${username}` : 'Connecting...'}
             </p>
           </div>
         </div>
@@ -117,7 +138,7 @@ export default function ChatRoom() {
             </div>
           );
         })}
-        <div ref={messagesEndRef} /> {/* Invisible div to scroll to */}
+        <div ref={messagesEndRef} />
       </main>
 
       {/* Input Form */}
@@ -127,12 +148,13 @@ export default function ChatRoom() {
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
-            placeholder="Type your message..."
-            className="flex-1 px-5 py-3 bg-gray-100 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+            disabled={!isConnected}
+            placeholder={isConnected ? "Type your message..." : "Waiting for connection..."}
+            className="flex-1 px-5 py-3 bg-gray-100 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={!inputMessage.trim()}
+            disabled={!inputMessage.trim() || !isConnected}
             className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-full px-6 py-3 font-medium transition-colors flex items-center justify-center"
           >
             Send
